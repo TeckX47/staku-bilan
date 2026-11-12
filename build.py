@@ -375,7 +375,7 @@ def card(title, subtitle, body, wide=False):
     return f'<section class="{cls}"><h2>{esc(title)}</h2><p class="sub">{esc(subtitle)}</p>{body}</section>'
 
 
-def render(agg, history, stamp):
+def render(agg, history, stamp, build=""):
     t, q, d, r = agg["taches"], agg["questions"], agg["decisions"], agg["risques"]
     done = t["statuts"]["Terminé"]
     libres = t["total"] - t["en_attente"]
@@ -425,7 +425,7 @@ def render(agg, history, stamp):
         "</div>",
     ])
     return PAGE.replace("{{TILES}}", tiles).replace("{{CARDS}}", cards).replace(
-        "{{STAMP}}", esc(stamp)).replace("{{NOTION}}", NOTION_URL)
+        "{{STAMP}}", esc(stamp)).replace("{{NOTION}}", NOTION_URL).replace("{{BUILD}}", build)
 
 
 PAGE = """<!doctype html>
@@ -551,6 +551,21 @@ function fit() {
 }
 fit();
 window.addEventListener('resize', fit);
+// Le navigateur garde parfois une ancienne copie de la page : on compare avec la version en ligne
+// et on recharge si elle a changé (au chargement, puis toutes les 5 minutes).
+const BUILD = '{{BUILD}}';
+async function refresh() {
+  try {
+    const answer = await fetch('version.txt?' + Date.now(), { cache: 'no-store' });
+    if (!answer.ok) return;
+    const latest = (await answer.text()).trim();
+    if (latest && latest !== BUILD && !location.search.includes('t=' + latest)) {
+      location.replace(location.pathname + '?t=' + latest);
+    }
+  } catch (error) { /* hors ligne : on garde la page affichée */ }
+}
+refresh();
+setInterval(refresh, 5 * 60 * 1000);
 const tip = document.getElementById('tip');
 document.addEventListener('pointermove', (event) => {
   const mark = event.target.closest('[data-tip]');
@@ -588,9 +603,12 @@ def main():
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=1)))
     history = update_history(history, agg, now.strftime("%Y-%m-%d"))
 
+    build = now.strftime("%Y%m%d%H%M%S")
     os.makedirs(args.out, exist_ok=True)
     with open(os.path.join(args.out, "index.html"), "w", encoding="utf-8") as handle:
-        handle.write(render(agg, history, now.strftime("%d/%m/%Y à %H:%M")))
+        handle.write(render(agg, history, now.strftime("%d/%m/%Y à %H:%M"), build))
+    with open(os.path.join(args.out, "version.txt"), "w", encoding="utf-8") as handle:
+        handle.write(build)
     with open(os.path.join(args.out, "history.json"), "w", encoding="utf-8") as handle:
         json.dump(history, handle, ensure_ascii=False, indent=1)
     print(f"Page écrite dans {args.out}/ : {agg['taches']['total']} tâches, "
