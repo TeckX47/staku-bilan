@@ -94,7 +94,7 @@ def fetch(token):
         return out
 
     return {
-        "taches": rows("taches", ["Statut", "Catégorie", "Jalon", "En attente de"]),
+        "taches": rows("taches", ["Statut", "Catégorie", "Jalon", "Questions et risques"]),
         "jalons": rows("jalons", ["Jalon", "Ordre", "État"]),
         "catalogue": rows("catalogue", ["Type", "État"]),
         "registre": rows("registre", ["Type", "Statut", "Section du GDD", "Probabilité", "Impact", "Code"]),
@@ -135,6 +135,8 @@ def aggregate(data):
     registre = data["registre"]
     questions = [r for r in registre if r.get("Type") == "Question"]
     decisions = [r for r in registre if r.get("Type") == "Décision"]
+    # Une tâche est en attente tant qu'une question liée n'est pas tranchée.
+    ids_ouvertes = {q["id"] for q in questions if q.get("Statut") != "Tranché"}
     risques = [r for r in registre if r.get("Type") == "Risque"]
     ouvertes = [q for q in questions if q.get("Statut") != "Tranché"]
     sections = {}
@@ -166,7 +168,12 @@ def aggregate(data):
         "taches": {
             "total": len(taches),
             "statuts": statuts,
-            "en_attente": sum(1 for t in taches if (t.get("En attente de") or "").strip()),
+            "en_attente": sum(
+                1
+                for t in taches
+                if t.get("Statut") != "Terminé"
+                and any(q in ids_ouvertes for q in (t.get("Questions et risques") or []))
+            ),
         },
         "par_jalon": par_jalon,
         "par_categorie": par_categorie,
