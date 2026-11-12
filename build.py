@@ -235,9 +235,9 @@ def legend(names, classes):
     return f'<div class="legend">{items}</div>'
 
 
-def stacked_bars(rows, order, classes, label_w=130, width=500):
+def stacked_bars(rows, order, classes, label_w=130, width=500, row_h=28):
     """Barres horizontales empilées. rows = [{label, counts{nom: n}}]."""
-    row_h, bar_h, right = 28, 16, 40
+    bar_h, right = row_h - 12 if row_h >= 28 else row_h - 7, 40 if row_h >= 28 else 30
     plot = width - label_w - right
     biggest = max((sum(r["counts"].values()) for r in rows), default=0) or 1
     height = row_h * len(rows) + 6
@@ -246,7 +246,7 @@ def stacked_bars(rows, order, classes, label_w=130, width=500):
         y = index * row_h + 7
         total = sum(row["counts"].values())
         parts.append(
-            f'<text class="lab" x="{label_w - 10}" y="{y + 12}" text-anchor="end">{esc(row["label"])}</text>'
+            f'<text class="lab" x="{label_w - 10}" y="{y + bar_h / 2 + 4:.1f}" text-anchor="end">{esc(row["label"])}</text>'
         )
         x = float(label_w)
         for name, cls in zip(order, classes):
@@ -260,22 +260,36 @@ def stacked_bars(rows, order, classes, label_w=130, width=500):
                 f'rx="3" data-tip="{esc(tip)}"><title>{esc(tip)}</title></rect>'
             )
             x += w
-        parts.append(f'<text class="val" x="{x + 6:.1f}" y="{y + 12}">{total}</text>')
+        parts.append(f'<text class="val" x="{x + 6:.1f}" y="{y + bar_h / 2 + 4:.1f}">{total}</text>')
     parts.append("</svg>")
     return "".join(parts)
 
 
-def responsive_bars(rows, order, classes):
-    """Version large pour l'écran, version étroite pour le téléphone."""
+FIT_W = 384  # largeur utile d'une carte dans la vue « tout sur un écran »
+
+
+def fit_bars(rows, order, classes, label_w=162):
+    """Version compacte, à l'échelle 1, pour la vue « tout sur un écran »."""
+    return f'<div class="only-fit">{stacked_bars(rows, order, classes, label_w, FIT_W, 20)}</div>'
+
+
+def responsive_bars(rows, order, classes, wide=True):
+    """Version large pour l'écran, étroite pour le téléphone, compacte pour la vue sans défilement."""
+    if not wide:
+        return f'<div class="not-fit">{stacked_bars(rows, order, classes)}</div>' + fit_bars(rows, order, classes, 96)
     return (
         f'<div class="only-wide">{stacked_bars(rows, order, classes, 210, 1060)}</div>'
         f'<div class="only-narrow">{stacked_bars(rows, order, classes, 150, 500)}</div>'
+        + fit_bars(rows, order, classes)
     )
 
 
 def simple_bars(pairs, label_w=130):
     rows = [{"label": label, "counts": {"n": n}} for label, n in pairs]
-    return stacked_bars(rows, ["n"], ["s-solo"], label_w)
+    return (
+        f'<div class="not-fit">{stacked_bars(rows, ["n"], ["s-solo"], label_w)}</div>'
+        + fit_bars(rows, ["n"], ["s-solo"], 110)
+    )
 
 
 def table(headers, rows):
@@ -315,7 +329,14 @@ def risk_matrix(matrice):
 def history_chart(history):
     if len(history) < 2:
         return '<p class="note">La courbe apparaîtra dès le deuxième jour de relevé.</p>'
-    width, height, left, right, top, bottom = 500, 220, 34, 96, 14, 26
+    return (
+        f'<div class="not-fit">{history_svg(history, 500, 220)}</div>'
+        f'<div class="only-fit">{history_svg(history, FIT_W, 190)}</div>'
+    )
+
+
+def history_svg(history, width, height):
+    left, right, top, bottom = 34, 96, 14, 26
     top_value = max(h["taches_total"] for h in history) or 1
     n = len(history)
 
@@ -369,6 +390,7 @@ def render(agg, history, stamp):
         tile("Risques maîtrisés", r["maitrises"], r["total"], f"{r['maitrises']} sur {r['total']}"),
     ])
     cards = "".join([
+        '<div class="col">',
         card(
             "Avancement par jalon", "Nombre de tâches de chaque jalon, par statut.",
             legend(STATUTS, status_cls) + responsive_bars(agg["par_jalon"], STATUTS, status_cls)
@@ -379,23 +401,28 @@ def render(agg, history, stamp):
             legend(STATUTS, status_cls) + responsive_bars(agg["par_categorie"], STATUTS, status_cls)
             + stacked_table(agg["par_categorie"], STATUTS), wide=True,
         ),
+        "</div>",
+        '<div class="col">',
         card(
             "Questions ouvertes par section", "Questions à trancher ou propositions à valider.",
             simple_bars(agg["par_section"]) + table(["Section", "Questions ouvertes"], agg["par_section"]),
         ),
         card(
+            "Catalogue par type", "Éléments du jeu, selon leur état dans le code.",
+            legend(ETATS, etat_cls) + responsive_bars(agg["par_type"], ETATS, etat_cls, wide=False)
+            + stacked_table(agg["par_type"], ETATS),
+        ),
+        "</div>",
+        '<div class="col">',
+        card(
             "Matrice des risques", "Risques ouverts, selon leur probabilité et leur impact.",
             risk_matrix(agg["matrice"]),
-        ),
-        card(
-            "Catalogue par type", "Éléments du jeu, selon leur état dans le code.",
-            legend(ETATS, etat_cls) + stacked_bars(agg["par_type"], ETATS, etat_cls)
-            + stacked_table(agg["par_type"], ETATS),
         ),
         card(
             "Tâches terminées dans le temps", "Un relevé par jour depuis la mise en place de cette page.",
             history_chart(history),
         ),
+        "</div>",
     ])
     return PAGE.replace("{{TILES}}", tiles).replace("{{CARDS}}", cards).replace(
         "{{STAMP}}", esc(stamp)).replace("{{NOTION}}", NOTION_URL)
@@ -441,11 +468,31 @@ a { color: inherit; }
 .meter span { display: block; height: 100%; background: var(--s2); border-radius: 3px; }
 .grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .card.wide { grid-column: 1 / -1; }
-.only-narrow { display: none; }
+.col { display: contents; }
+.only-narrow, .only-fit { display: none; }
 @media (max-width: 760px) {
   .grid2 { grid-template-columns: minmax(0, 1fr); }
   .only-wide { display: none; } .only-narrow { display: block; }
 }
+/* Vue « tout sur un écran » : la page garde une taille fixe et se met à l'échelle de la fenêtre. */
+html.fit, html.fit body { height: 100%; overflow: hidden; }
+html.fit body { padding: 0; }
+html.fit main { position: absolute; top: 0; left: 0; width: 1280px; height: 800px; max-width: none; margin: 0;
+  padding: 14px; transform-origin: 0 0; display: flex; flex-direction: column; }
+html.fit header { padding-bottom: 8px; margin-bottom: 10px; }
+html.fit .tiles { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 10px; }
+html.fit .tile { padding: 10px 14px; }
+html.fit .tile-value { font-size: 26px; }
+html.fit .grid2 { flex: 1; min-height: 0; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+html.fit .col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+html.fit .card { padding: 12px; }
+html.fit .col .card:last-child { flex: 1; }
+html.fit h2 { margin-bottom: 8px; }
+html.fit .sub, html.fit details, html.fit .only-wide, html.fit .only-narrow, html.fit .not-fit { display: none; }
+html.fit .only-fit { display: block; }
+html.fit .matrix { grid-template-columns: 78px repeat(3, minmax(0, 1fr)); }
+html.fit .m-side { padding-left: 0; }
+html.fit .note { margin: 8px 0; }
 h2 { font-size: 15px; margin: 0; font-weight: 600; }
 .sub { margin: 2px 0 10px; color: var(--ink3); font-size: 12px; }
 svg { display: block; width: 100%; height: auto; overflow: visible; }
@@ -493,6 +540,17 @@ th:first-child, td:first-child { text-align: left; } th { color: var(--ink3); }
 </main>
 <div id="tip" role="status"></div>
 <script>
+function fit() {
+  const w = window.innerWidth, h = window.innerHeight;
+  const scale = Math.min(w / 1280, h / 800);
+  const on = w >= 900 && scale >= 0.7;
+  const main = document.querySelector('main');
+  document.documentElement.classList.toggle('fit', on);
+  main.style.transform = on ? 'scale(' + scale + ')' : '';
+  main.style.left = on ? ((w - 1280 * scale) / 2) + 'px' : '';
+}
+fit();
+window.addEventListener('resize', fit);
 const tip = document.getElementById('tip');
 document.addEventListener('pointermove', (event) => {
   const mark = event.target.closest('[data-tip]');
